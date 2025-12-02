@@ -16,8 +16,13 @@ wheels/
 *.db
 *.db-journal
 
+# Export files
+*.kml
+*.kmz
+
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+.DS_Store
