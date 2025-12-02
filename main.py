@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-ADS-B Aircraft Tracker
-Reads dump1090 JSON data and logs aircraft information to database.
-"""
-
 import json
 import time
 import os
@@ -12,7 +6,7 @@ import logging
 import argparse
 from typing import Dict, Any, Optional
 
-from models import Aircraft, init_db, close_db
+from models import Aircraft, init_db, close_db, get_or_create_flight_session
 
 
 def setup_logging(level: str = 'INFO') -> logging.Logger:
@@ -56,6 +50,25 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def convert_to_metric(aircraft: Dict[str, Any]) -> Dict[str, float]:
+    """Convert imperial units to metric."""
+    conversions = {}
+
+    # Altitude: feet → meters
+    if aircraft.get('altitude') is not None:
+        conversions['altitude_m'] = aircraft['altitude'] * 0.3048
+
+    # Speed: knots → km/h
+    if aircraft.get('speed') is not None:
+        conversions['speed_kmh'] = aircraft['speed'] * 1.852
+
+    # Vertical rate: feet/min → m/s
+    if aircraft.get('vert_rate') is not None:
+        conversions['vert_rate_ms'] = aircraft['vert_rate'] * 0.00508
+
+    return conversions
+
+
 def read_aircraft_json(json_file: str, logger: logging.Logger) -> Optional[Dict[str, Any]]:
     """Read and parse dump1090 JSON file."""
     try:
@@ -77,24 +90,36 @@ def read_aircraft_json(json_file: str, logger: logging.Logger) -> Optional[Dict[
 
 
 def save_aircraft_to_db(aircraft: Dict[str, Any], logger: logging.Logger) -> bool:
-    """Save aircraft data to database."""
+    """Save aircraft data to database with both imperial and metric units."""
     try:
+        icao_hex = aircraft.get('hex', '').upper()
+
+        # Get or create flight session to group consecutive observations
+        flight_session_id = get_or_create_flight_session(icao_hex)
+
         # Convert arrays to JSON strings
         mlat_json = json.dumps(aircraft.get('mlat', []))
         tisb_json = json.dumps(aircraft.get('tisb', []))
 
+        # Convert imperial to metric
+        metric = convert_to_metric(aircraft)
+
         # Create database record
         Aircraft.create(
-            hex=aircraft.get('hex', '').upper(),
+            hex=icao_hex,
+            flight_session_id=flight_session_id,
             flight=aircraft.get('flight', '').strip() or None,
             squawk=aircraft.get('squawk'),
             category=aircraft.get('category'),
             lat=aircraft.get('lat'),
             lon=aircraft.get('lon'),
             altitude=aircraft.get('altitude'),
+            altitude_m=metric.get('altitude_m'),
             speed=aircraft.get('speed'),
+            speed_kmh=metric.get('speed_kmh'),
             track=aircraft.get('track'),
             vert_rate=aircraft.get('vert_rate'),
+            vert_rate_ms=metric.get('vert_rate_ms'),
             nucp=aircraft.get('nucp'),
             seen_pos=aircraft.get('seen_pos'),
             messages=aircraft.get('messages'),

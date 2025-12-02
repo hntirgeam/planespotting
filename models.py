@@ -1,24 +1,46 @@
 #!/usr/bin/env python3
 """
 Database models for ADS-B aircraft tracking.
-Uses peewee ORM with SQLite backend.
+Uses peewee ORM with PostgreSQL backend.
 """
 
 from peewee import (
-    Model, SqliteDatabase, CharField, FloatField,
-    IntegerField, DateTimeField, TextField
+    Model, PostgresqlDatabase, CharField, FloatField,
+    IntegerField, DateTimeField, TextField, UUIDField
 )
 from datetime import datetime
+from environs import Env
+import uuid
 
-# Database instance
-db = SqliteDatabase('adsb_tracker.db')
+# Load environment variables
+env = Env()
+env.read_env()
+
+# Database instance from connection string
+db = PostgresqlDatabase(
+    env.str('DB_NAME'),
+    user=env.str('DB_USER'),
+    password=env.str('DB_PASSWORD'),
+    host=env.str('DB_HOST', 'localhost'),
+    port=env.int('DB_PORT', 5432)
+)
 
 
 class Aircraft(Model):
     """
     Aircraft tracking record from dump1090.
     Stores all available fields from ADS-B messages.
+
+    flight_session_id groups consecutive observations of the same aircraft.
+    When an aircraft disappears for more than SESSION_TIMEOUT, a new session starts.
+    This prevents trajectory jumps when plotting flight paths.
     """
+    # Primary key
+    id = UUIDField(primary_key=True, default=uuid.uuid4)
+
+    # Flight session grouping for trajectory analysis
+    flight_session_id = UUIDField(index=True, null=True)
+
     # Primary identification
     hex = CharField(max_length=6, index=True)  # ICAO address
     timestamp = DateTimeField(default=datetime.now, index=True)
@@ -31,12 +53,17 @@ class Aircraft(Model):
     # Position data
     lat = FloatField(null=True)
     lon = FloatField(null=True)
-    altitude = IntegerField(null=True)  # feet
 
-    # Movement data
+    # Altitude (imperial and metric)
+    altitude = IntegerField(null=True)  # feet
+    altitude_m = FloatField(null=True)  # meters
+
+    # Movement data (imperial and metric)
     speed = IntegerField(null=True)  # knots
+    speed_kmh = FloatField(null=True)  # km/h
     track = IntegerField(null=True)  # degrees
     vert_rate = IntegerField(null=True)  # feet/min
+    vert_rate_ms = FloatField(null=True)  # m/s
 
     # Position accuracy
     nucp = IntegerField(null=True)
@@ -68,8 +95,31 @@ def close_db():
         db.close()
 
 
-# Migration notes:
-# To migrate from SQLite to PostgreSQL:
-# 1. Change: db = PostgresqlDatabase('adsb_tracker', user='your_user', password='your_pass', host='localhost')
-# 2. Export data: sqlite3 adsb_tracker.db .dump > backup.sql
-# 3. Convert and import using pgloader or manually adjust SQL syntax (main differences: AUTOINCREMENT -> SERIAL, TEXT -> VARCHAR, etc.)
+# Session timeout in seconds (30 minutes)
+SESSION_TIMEOUT = 1800
+
+
+def get_or_create_flight_session(icao_hex: str) -> uuid.UUID:
+    """
+    Get existing flight session or create new one based on last observation time.
+
+    If the aircraft hasn't been seen for more than SESSION_TIMEOUT seconds,
+    creates a new session to avoid trajectory jumps in visualization.
+
+    Args:
+        icao_hex: Aircraft ICAO address
+
+    Returns:
+        UUID of the flight session
+    """
+    last_record = Aircraft.select().where(Aircraft.hex == icao_hex.upper()).order_by(Aircraft.timestamp.desc()).first()
+
+    if last_record:
+        time_diff = (datetime.now() - last_record.timestamp).total_seconds()
+
+        # If seen recently, reuse session
+        if time_diff < SESSION_TIMEOUT:
+            return last_record.flight_session_id
+
+    # Create new session
+    return uuid.uuid4()
