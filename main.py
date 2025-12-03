@@ -229,8 +229,7 @@ def process_aircraft_data(
     for aircraft in data.get('aircraft', []):
         if not pretty_mode:
             log_aircraft_structured(aircraft, logger)
-
-        save_aircraft_to_db(aircraft, logger)
+            save_aircraft_to_db(aircraft, logger)
 
 
 def main():
@@ -247,7 +246,7 @@ def main():
         sys.exit(1)
 
     if args.pretty:
-        print("🛩️  Aircraft Tracker (Pretty mode + Database logging)")
+        print("🛩️  Pretty Aircraft Tracker (NO DATABASE LOGGING)")
         print("=" * 80)
     else:
         logger.info("Starting ADS-B tracker in structured logging mode")
