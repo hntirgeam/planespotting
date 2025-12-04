@@ -16,20 +16,31 @@ def generate_color(icao_hex: str) -> str:
     return f'ff{b:02x}{g:02x}{r:02x}'
 
 
-def fetch_trajectories():
+def fetch_trajectories(max_altitude_m: float = None):
     """
     Fetch all aircraft records with coordinates from database.
+
+    Args:
+        max_altitude_m: Maximum altitude in meters (filter out higher altitudes)
+
     Returns dict: {icao_hex: {session_id: [records]}}
     """
+    # Build query conditions
+    conditions = [
+        Aircraft.lat.is_null(False),
+        Aircraft.lon.is_null(False),
+        Aircraft.altitude_m.is_null(False)
+    ]
+
+    # Add altitude filter if specified
+    if max_altitude_m is not None:
+        conditions.append(Aircraft.altitude_m <= max_altitude_m)
+
     # Query all records with position data, ordered by timestamp
     records = (
         Aircraft
         .select()
-        .where(
-            (Aircraft.lat.is_null(False)) &
-            (Aircraft.lon.is_null(False)) &
-            (Aircraft.altitude_m.is_null(False))
-        )
+        .where(*conditions)
         .order_by(Aircraft.timestamp.asc())
     )
 
@@ -83,9 +94,7 @@ def create_kml(trajectories: dict, output_file: str, min_points: int = 3):
             duration = (end_time - start_time).total_seconds() / 60  # minutes
 
             # Create LineString for trajectory
-            linestring = aircraft_folder.newlinestring(
-                name=f"{flight_name.strip()} ({start_time.strftime('%Y-%m-%d %H:%M')})"
-            )
+            linestring = aircraft_folder.newlinestring(name=f"{icao_hex} ({start_time.strftime('%Y-%m-%d %H:%M')})")
 
             # Add coordinates (lon, lat, altitude)
             coords = []
@@ -115,22 +124,22 @@ def create_kml(trajectories: dict, output_file: str, min_points: int = 3):
             linestring.description = description
 
             # Add start point marker
-            start_point = aircraft_folder.newpoint(
-                name=f"Start: {flight_name.strip()}",
-                coords=[(points[0].lon, points[0].lat, points[0].altitude_m)]
-            )
-            start_point.style.iconstyle.color = simplekml.Color.green
-            start_point.style.iconstyle.scale = 0.7
-            start_point.altitudemode = simplekml.AltitudeMode.absolute
+            # start_point = aircraft_folder.newpoint(
+            #     name=f"Start: {flight_name.strip()}",
+            #     coords=[(points[0].lon, points[0].lat, points[0].altitude_m)]
+            # )
+            # start_point.style.iconstyle.color = simplekml.Color.green
+            # start_point.style.iconstyle.scale = 0.7
+            # start_point.altitudemode = simplekml.AltitudeMode.absolute
 
             # Add end point marker
-            end_point = aircraft_folder.newpoint(
-                name=f"End: {flight_name.strip()}",
-                coords=[(points[-1].lon, points[-1].lat, points[-1].altitude_m)]
-            )
-            end_point.style.iconstyle.color = simplekml.Color.red
-            end_point.style.iconstyle.scale = 0.7
-            end_point.altitudemode = simplekml.AltitudeMode.absolute
+            # end_point = aircraft_folder.newpoint(
+            #     name=f"End: {flight_name.strip()}",
+            #     coords=[(points[-1].lon, points[-1].lat, points[-1].altitude_m)]
+            # )
+            # end_point.style.iconstyle.color = simplekml.Color.red
+            # end_point.style.iconstyle.scale = 0.7
+            # end_point.altitudemode = simplekml.AltitudeMode.absolute
 
     # Save KML file
     kml.save(output_file)
@@ -153,6 +162,11 @@ def main():
         help='Minimum points required per trajectory (default: 3)'
     )
     parser.add_argument(
+        '--max-altitude',
+        type=float,
+        help='Maximum altitude in meters (filter out higher altitudes)'
+    )
+    parser.add_argument(
         '--icao',
         help='Filter by specific ICAO hex code'
     )
@@ -172,7 +186,9 @@ def main():
 
     # Fetch trajectories
     print("📡 Fetching trajectories from database...")
-    trajectories = fetch_trajectories()
+    if args.max_altitude:
+        print(f"🔧 Filtering altitudes <= {args.max_altitude}m")
+    trajectories = fetch_trajectories(max_altitude_m=args.max_altitude)
 
     if not trajectories:
         print("⚠️  No trajectories found in database")

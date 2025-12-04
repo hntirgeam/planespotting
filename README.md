@@ -2,6 +2,12 @@
 
 Log ADS-B data from dump1090 to PostgreSQL database and export flight trajectories to Google Earth.
 
+**Features:**
+- Flight session tracking - prevents trajectory jumps in visualizations
+- Metric + imperial units stored in database
+- KML export for Google Earth
+- Automatic retry on database errors
+
 ## Setup
 
 ### 1. Install dependencies
@@ -48,6 +54,9 @@ python export_kml.py
 
 # Export specific aircraft
 python export_kml.py --icao 4C01E2
+
+# Filter by maximum altitude (in meters)
+python export_kml.py --max-altitude 5000
 
 # Custom output file
 python export_kml.py --output my_flights.kml
